@@ -1,4 +1,4 @@
-defmodule RPCBroker.ConsumerTest do
+defmodule HeBroker.ConsumerTest do
   use ExUnit.Case
 
   test "Subscribe to a topic and receive a cast"

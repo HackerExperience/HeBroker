@@ -1,4 +1,4 @@
-defmodule RPCBroker.PublisherTest do
+defmodule HeBroker.PublisherTest do
   use ExUnit.Case
 
   test "Subscribe from a topic"

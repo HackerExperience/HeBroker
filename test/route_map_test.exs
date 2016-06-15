@@ -1,4 +1,4 @@
-defmodule RPCBroker.RouteMapTest do
+defmodule HeBroker.RouteMapTest do
   use ExUnit.Case
 
   test "Merge two routemaps"
