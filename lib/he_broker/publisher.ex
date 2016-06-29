@@ -128,6 +128,6 @@ defmodule HeBroker.Publisher do
 
   @spec do_subscribe({[topic], RouteMap.t}, topic | [topic]) :: {[topic], RouteMap.t}
   defp do_subscribe({topics, routes}, topic) do
-    {topic ++ topics, RouteMap.merge(routes, HeBroker.publisher_subscribe(topic))}
+    {List.wrap(topic) ++ topics, RouteMap.merge(routes, HeBroker.publisher_subscribe(topic))}
   end
 end

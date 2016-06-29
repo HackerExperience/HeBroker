@@ -54,13 +54,11 @@ defmodule HeBroker.RouteMap do
   def topic_call(routemap, topic) do
     case routemap do
       %{^topic => apps} ->
-        return = {app_calls, queued_routes} = get_calls(apps)
-
-        case return do
+        case get_calls(apps) do
           {[], []} ->
             {:error, :not_found}
-          _ ->
-            {:ok, return}
+          {casts, new_apps} ->
+            {:ok, {casts, Map.put(routemap, topic, new_apps)}}
         end
       _ ->
         {:error, :not_found}
@@ -78,13 +76,11 @@ defmodule HeBroker.RouteMap do
   def topic_cast(routemap, topic) do
     case routemap do
       %{^topic => apps} ->
-        return = {app_casts, queued_routes} = get_casts(apps)
-        
-        case return do
+        case get_casts(apps) do
           {[], []} ->
             {:error, :not_found}
-          _ ->
-            {:ok, return}
+          {casts, new_apps} ->
+            {:ok, {casts, Map.put(routemap, topic, new_apps)}}
         end
       _ ->
         {:error, :not_found}
@@ -150,7 +146,7 @@ defmodule HeBroker.RouteMap do
   defp get_calls(apps, acc \\ {[], []})
   defp get_calls([], acc),
     do: acc
-  defp get_calls([{a, {cast, call, queue}}|t], {r, c}) do
+  defp get_calls([{a, {cast, call, queue}}|t], {c, r}) do
     {{:value, pid}, q2} = :queue.out(queue)
     get_calls(t, {[{call, pid}|c], [{a, {cast, call, :queue.in(pid, q2)}}|r]})
   end
@@ -159,7 +155,7 @@ defmodule HeBroker.RouteMap do
   defp get_casts(apps, acc \\ {[], []})
   defp get_casts([], acc),
     do: acc
-  defp get_casts([{a, {cast, call, queue}}|t], {r, c}) do
+  defp get_casts([{a, {cast, call, queue}}|t], {c, r}) do
     {{:value, pid}, q2} = :queue.out(queue)
     get_casts(t, {[{cast, pid}|c], [{a, {cast, call, :queue.in(pid, q2)}}|r]})
   end
@@ -171,7 +167,7 @@ defmodule HeBroker.RouteMap do
   defp update_apps([{app, {cast, call, queue}}|t], app, pid, cast, call, acc),
     do: [{app, {cast, call, :queue.snoc(queue, pid)}}|t] ++ acc
   defp update_apps([{app, _}|_], app, _, _, _, _),
-    do: raise RuntimeError, msg: "Incompatible functions for consuming on HeBroker for consumer #{inspect app}"
+    do: raise RuntimeError, message: "Incompatible functions for consuming on HeBroker for consumer #{inspect app}"
   defp update_apps([h|t], app, pid, cast, call, acc),
     do: update_apps(t, app, pid, cast, call, [h|acc])
 
@@ -180,7 +176,7 @@ defmodule HeBroker.RouteMap do
   defp remove_consumer_from_topic([], _, _, acc),
     do: acc
   defp remove_consumer_from_topic([{app, {cast, call, queue}}|t], app, pid, acc) do
-    q2 = :queue.filter(queue, fn item -> item !== pid end)
+    q2 = :queue.filter(fn item -> item !== pid end, queue)
     if :queue.empty?(q2),
       do: remove_consumer_from_topic(t, app, pid, acc),
       else: remove_consumer_from_topic(t, app, pid, [{app, {cast, call, q2}}|acc])
