@@ -79,6 +79,10 @@ defmodule HeBroker.Publisher do
   def consumer_down(pid, topics_apps, consumer),
     do: GenServer.cast(pid, {:consumer_down, topics_apps, consumer})
 
+  def lookup(publisher, topic) do
+    GenServer.call(publisher, {:lookup, topic})
+  end
+
   @doc false
   def init(topics) do
     routes = topics |> List.wrap() |> HeBroker.publisher_subscribe()
@@ -112,6 +116,11 @@ defmodule HeBroker.Publisher do
         end
     end
   end
+
+  def handle_call({:lookup, topic}, caller, s = {t, r}) do
+    {:reply, Enum.member?(t, topic), s}
+  end
+
 
   @doc false
   def handle_cast({:subscribe, topics}, s) do
