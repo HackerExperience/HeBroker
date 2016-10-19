@@ -4,3 +4,17 @@
 /doc
 erl_crash.dump
 *.ez
+
+# IntelliJ
+/.idea
+*.iml
+
+# Sublime
+*.sublime-project
+*.sublime-workspace
+
+# Emacs
+.\#*
+
+# Macintosh
+*.DS_Store

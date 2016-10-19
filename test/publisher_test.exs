@@ -1,26 +1,74 @@
 defmodule HeBroker.PublisherTest do
+
   use ExUnit.Case
 
-  setup_all do
-    {:ok, _} = HeBroker.start_link
-    publisher = HeBroker.Publisher.start_link
-    {:ok, publisher: publisher}
+  alias HeBroker.Broker
+  alias HeBroker.Publisher
+  alias HeBroker.TestHelper.Consumer, as: ConsumerHelper
+
+  setup do
+    {:ok, pid} = Broker.start_link()
+
+    {:ok, broker: pid}
   end
 
-  test "Subscribe from a topic", %{publisher: publisher} do
-    assert false == HeBroker.Publisher.lookup(publisher, "foo:bar")
+  describe "messaging" do
+    test "nothing happens when messaging a topic without consumers", %{broker: broker} do
+      assert 0 === Broker.count_services_on_topic(broker, "empty")
 
-    HeBroker.Publisher.subscribe(publisher, ["foo:bar"])
-    assert true == HeBroker.Publisher.lookup(publisher, "foo:bar")
+      # TODO: without prying, there is no way to ensure that no message was
+      #   actualy send
+      Publisher.cast(broker, "empty", fn -> raise RuntimeError end)
+    end
   end
 
-  test "Subscribe from a topic on-the-run"
+  describe "cast" do
+  end
 
-  test "Be notified of consumer shutdown on subscribed topic"
+  describe "call" do
+    test "calling a topic without consumers won't yield any result (and thus raise)", %{broker: broker} do
+      assert 0 === Broker.count_services_on_topic(broker, "empty")
 
-  test "Be notified of consumer startup on subscribed topic"
+      assert_raise HeBroker.Request.TimeoutError, fn ->
+        Publisher.call(broker, "empty", fn -> flunk() end, timeout: 100)
+      end
+    end
 
-  test "Execute all cast functions on a topic"
+    test "calling a topic whose consumers doesn't reply raises", %{broker: broker} do
+      assert 0 === Broker.count_services_on_topic(broker, "fail")
 
-  test "Execute all call functions on a topic"
+      me = self()
+
+      ConsumerHelper.spawn_consumer(broker, "fail", call: fn _, _, message, _ -> send me, message; :noreply end)
+
+      assert 1 === Broker.count_services_on_topic(broker, "fail")
+
+      assert_raise HeBroker.Request.TimeoutError, fn ->
+        Publisher.call(broker, "fail", :kek, timeout: 100)
+      end
+
+      assert_received :kek
+    end
+
+    test "when two different consumers respond a call, only the first received response is returned", %{broker: broker} do
+      topic = "let:the:bodies:hit:the:floor"
+      assert 0 === Broker.count_services_on_topic(broker, topic)
+
+      me = self()
+      call_fun1 = fn _, _, _, _ -> send me, {:received, 1}; {:reply, 1} end
+      call_fun2 = fn _, _, _, _ -> send me, {:received, 2}; {:reply, 2} end
+
+      ConsumerHelper.spawn_consumer(broker, topic, call: call_fun1)
+      ConsumerHelper.spawn_consumer(broker, topic, call: call_fun2)
+
+      assert 2 === Broker.count_services_on_topic(broker, topic)
+
+      reply = Publisher.call(broker, topic, :yay, timeout: 1000)
+
+      assert 1 === reply.reply or 2 === reply.reply
+      assert_received {:received, 1}
+      assert_received {:received, 2}
+      refute_received _ # Ensure that no garbage was sent to our mailbox
+    end
+  end
 end

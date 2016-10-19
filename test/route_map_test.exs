@@ -1,15 +1,12 @@
 defmodule HeBroker.RouteMapTest do
-  use ExUnit.Case
 
-  test "Merge two routemaps"
+  use ExUnit.Case
 
   test "Insert an application to an inexistent topic"
 
   test "Insert two different applications on a topic"
 
   test "Insert two identical applications on a topic"
-
-  test "Fail insert when two consumers on the same topic/application are different"
 
   test "Return a cast definition for an application"
 
