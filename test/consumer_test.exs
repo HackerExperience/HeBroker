@@ -93,7 +93,7 @@ defmodule HeBroker.ConsumerTest do
         end
       end
 
-      ycombinator1 = ycombinator_factory.(:y1)
+      ycombinator1 = ycombinator_factory.(:y3)
       ycombinator2 = ycombinator_factory.(:y2)
 
       cast_callback = fn pid, _, message, _ -> send pid, message end
@@ -105,9 +105,23 @@ defmodule HeBroker.ConsumerTest do
       Publisher.cast(broker, "test", :bar)
       Publisher.cast(broker, "test", :baz)
 
-      spawn fn -> Publisher.cast(broker, "test", :kek) end
-      spawn fn -> Publisher.cast(broker, "test", :lol) end
-      spawn fn -> Publisher.cast(broker, "test", :bbq) end
+      spawn_publisher = fn message ->
+        me = self()
+        spawn fn ->
+          Publisher.cast(broker, "test", message)
+
+          send me, :ping
+        end
+
+        receive do
+          :ping -> :ok
+        after 1_000 -> flunk()
+        end
+      end
+
+      spawn_publisher.(:kek)
+      spawn_publisher.(:lol)
+      spawn_publisher.(:bbq)
 
       assert_receive {:y, y1, :foo}
       assert_receive {:y, y2, :bar}

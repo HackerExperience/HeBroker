@@ -16,9 +16,9 @@ defmodule HeBroker.PublisherTest do
     test "nothing happens when messaging a topic without consumers", %{broker: broker} do
       assert 0 === Broker.count_services_on_topic(broker, "empty")
 
-      # TODO: without prying, there is no way to ensure that no message was
-      #   actualy send
-      Publisher.cast(broker, "empty", fn -> raise RuntimeError end)
+      request = Publisher.cast(broker, "empty", fn -> raise RuntimeError end)
+
+      assert 0 === HeBroker.Pry.messages_sent(request)
     end
   end
 

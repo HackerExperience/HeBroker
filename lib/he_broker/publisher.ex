@@ -4,6 +4,8 @@ defmodule HeBroker.Publisher do
   alias HeBroker.Request.Reply
   alias HeBroker.Request.OngoingRequest
 
+  require HeBroker.Pry, as: Pry
+
   @type broker :: pid | atom
   @type topic :: String.t
   @type message :: term
@@ -25,11 +27,12 @@ defmodule HeBroker.Publisher do
       params
       |> Keyword.get(:request)
       |> Request.init(Keyword.get(params, :headers))
+      |> Pry.pry_origin_request()
       |> Request.bounce(topic)
 
     broker
     |> HeBroker.Broker.cast_callbacks(topic)
-    |> List.wrap()
+    |> Pry.pry_sent(:cast, broker, topic, message, request)
     |> Enum.each(fn callback ->
       spawn fn ->
         callback.(message, request)
@@ -68,11 +71,12 @@ defmodule HeBroker.Publisher do
       params
       |> Keyword.get(:request)
       |> Request.init(Keyword.get(params, :headers))
+      |> Pry.pry_origin_request()
       |> Request.bounce(topic)
 
     broker
     |> HeBroker.Broker.call_callbacks(topic)
-    |> List.wrap()
+    |> Pry.pry_sent(:call, broker, topic, message, request)
     |> OngoingRequest.start(message, request)
   end
 

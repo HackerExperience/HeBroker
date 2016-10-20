@@ -6,7 +6,7 @@ defmodule HeBroker.GenBroker do
       @broker __MODULE__
 
       def start_link,
-        do: HeBroker.start_link(name: @broker)
+        do: HeBroker.start_link(@broker)
 
       def count_services_on_topic(topic),
         do: HeBroker.count_services_on_topic(@broker, topic)

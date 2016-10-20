@@ -46,24 +46,13 @@ defmodule HeBroker.RouteMap do
   is returned
   """
   def callback(%Service{call: nil}, _, :call),
-    do: generic_callback()
+    do: nil
   def callback(%Service{cast: nil}, _, :cast),
-    do: generic_callback()
+    do: nil
   def callback(%Service{cast: cast, pool: pool}, topic, :cast),
     do: build_partial(cast, pool, topic)
   def callback(%Service{call: call, pool: pool}, topic, :call),
     do: build_partial(call, pool, topic)
-
-  @spec generic_callback() :: partial_callback
-  @docp """
-  A simple generic callback compatible with the broker interface that does
-  nothing
-  """
-  defp generic_callback do
-    fn _, _ ->
-      :noreply
-    end
-  end
 
   @spec build_partial(cast_fun | call_fun, :queue.queue, topic) :: partial_callback
   @docp """

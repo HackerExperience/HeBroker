@@ -1,6 +1,8 @@
 defmodule HeBroker.Broker do
   @moduledoc false
 
+  use GenServer
+
   alias HeBroker.RouteMap
 
   @type topic :: String.t
@@ -69,6 +71,7 @@ defmodule HeBroker.Broker do
     |> GenServer.call({:topic, topic})
     |> List.wrap()
     |> Enum.map(&RouteMap.callback(&1, topic, type))
+    |> Enum.reject(&is_nil/1)
   end
 
   @doc false
