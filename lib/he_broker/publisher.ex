@@ -3,8 +3,7 @@ defmodule HeBroker.Publisher do
   alias HeBroker.Request
   alias HeBroker.Request.Reply
   alias HeBroker.Request.OngoingRequest
-
-  require HeBroker.Pry, as: Pry
+  alias HeBroker.Pry
 
   @type broker :: pid | atom
   @type topic :: String.t
