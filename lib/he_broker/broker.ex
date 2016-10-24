@@ -70,7 +70,7 @@ defmodule HeBroker.Broker do
     broker
     |> GenServer.call({:topic, topic})
     |> List.wrap()
-    |> Enum.map(&RouteMap.callback(&1, topic, type))
+    |> Enum.map(&RouteMap.callback(&1, type))
     |> Enum.reject(&is_nil/1)
   end
 

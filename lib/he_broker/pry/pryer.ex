@@ -1,43 +1,60 @@
 defmodule HeBroker.Pry.Pryer do
+  @moduledoc """
+  Stores a graph with the flow of requests
+  """
 
   alias HeBroker.Request
   alias HeBroker.Pry.MessageSent
+  alias HeBroker.Pry.MessageLost
 
   def start_link,
     do: GenServer.start_link(__MODULE__, [], name: __MODULE__)
 
-  def annotate_origin_request(request = %Request{}) do
-    GenServer.cast(__MODULE__, {:annotate, request, self()})
-  end
+  def annotate_origin_request(request = %Request{}),
+    do: GenServer.cast(__MODULE__, {:annotate, :origin, request})
 
-  def annotate_sent(message = %MessageSent{}) do
-    GenServer.cast(__MODULE__, {:annotate, message, self()})
-  end
+  def annotate_sent(original = %Request{}, sent = %MessageSent{}),
+    do: GenServer.cast(__MODULE__, {:annotate, :sent, original, sent})
 
-  def graph do
-    GenServer.call(__MODULE__, :graph)
-  end
+  def annotate_lost(original = %Request{}, lost = %MessageLost{}),
+    do: GenServer.cast(__MODULE__, {:annotate, :lost, original, lost})
 
+  def graph,
+    do: GenServer.call(__MODULE__, :graph)
+
+  @doc false
   def init(_) do
-    {:ok, %{graph: :digraph.new(), origin_requests: %{}}}
+    {:ok, %{graph: :digraph.new([:acyclic])}}
   end
 
-  def handle_cast({:annotate, message = %MessageSent{}, publisher}, state) do
-    origin = Map.get(state.origin_requests, publisher)
-
-    :digraph.add_vertex(state.graph, message.request.message_id, message)
-
-    unless is_nil(origin.message_id) do
-      :digraph.add_edge(state.graph, origin.message_id, message.request.message_id)
+  @doc false
+  def handle_cast({:annotate, :origin, request}, state) do
+    unless :digraph.vertex(state.graph, request.message_id) do
+      :digraph.add_vertex(state.graph, request.message_id, request)
     end
 
-    {:noreply, Map.update!(state, :origin_requests, &Map.delete(&1, publisher))}
+    {:noreply, state}
   end
 
-  def handle_cast({:annotate, request = %Request{}, publisher}, state) do
-    {:noreply, Map.update!(state, :origin_requests, &Map.put(&1, publisher, request))}
+  def handle_cast({:annotate, :sent, original, sent}, state) do
+    :digraph.add_vertex(state.graph, sent.request.message_id, sent)
+
+    :digraph.add_edge(state.graph, original.message_id, sent.request.message_id)
+
+    {:noreply, state}
   end
 
+  def handle_cast({:annotate, :lost, original, lost_message}, state) do
+    vertex_identifier = make_ref()
+
+    :digraph.add_vertex(state.graph, vertex_identifier, lost_message)
+
+    :digraph.add_edge(state.graph, original.message_id, vertex_identifier)
+
+    {:noreply, state}
+  end
+
+  @doc false
   def handle_call(:graph, _, state) do
     {:reply, state.graph, state}
   end

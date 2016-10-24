@@ -23,9 +23,11 @@ defmodule HeBroker.RouteMap do
 
   @type expected_call_return :: :noreply | {:reply, any}
   @type expected_cast_return :: no_return
+  @type callback_return :: expected_call_return | expected_cast_return
+
   @type cast_fun :: ((consumer :: pid, topic, message :: any, Request.t) -> expected_cast_return)
   @type call_fun :: ((consumer :: pid, topic, message :: any, Request.t) -> expected_call_return)
-  @type partial_callback :: ((message :: any, Request.t) -> expected_cast_return | expected_call_return)
+  @type partial :: ((topic, message :: any, Request.t) -> callback_return)
 
   @type topic :: String.t
   @type service :: Service.t
@@ -38,31 +40,30 @@ defmodule HeBroker.RouteMap do
   def new,
     do: %{}
 
-  @spec callback(Service.t, topic, :call | :cast) :: partial_callback
+  @spec callback(Service.t, :call | :cast) :: partial
   @doc """
-  Returns a partial based on the service callback.
+  Returns a partial based on the service's callback.
 
-  If the service doesn't provide a proper callback, a partial that does nothing
-  is returned
+  If the service doesn't provide a proper callback, `nil` is returned
   """
-  def callback(%Service{call: nil}, _, :call),
+  def callback(%Service{call: nil}, :call),
     do: nil
-  def callback(%Service{cast: nil}, _, :cast),
+  def callback(%Service{cast: nil}, :cast),
     do: nil
-  def callback(%Service{cast: cast, pool: pool}, topic, :cast),
-    do: build_partial(cast, pool, topic)
-  def callback(%Service{call: call, pool: pool}, topic, :call),
-    do: build_partial(call, pool, topic)
+  def callback(%Service{cast: cast, pool: pool}, :cast),
+    do: build_partial(cast, pool)
+  def callback(%Service{call: call, pool: pool}, :call),
+    do: build_partial(call, pool)
 
-  @spec build_partial(cast_fun | call_fun, :queue.queue, topic) :: partial_callback
+  @spec build_partial(cast_fun | call_fun, :queue.queue(pid)) :: partial
   @docp """
-  Wraps `function` in a partial providing `topic` and the head pid from `pool`,
-  returning a 2-fun callback
+  Wraps `function` in a partial providing the head pid from `pool`, returning a
+  3-fun callback
   """
-  defp build_partial(function, pool, topic) do
+  defp build_partial(function, pool) do
     pid = :queue.get(pool)
 
-    fn message, request ->
+    fn topic, message, request ->
       function.(pid, topic, message, request)
     end
   end
@@ -100,8 +101,10 @@ defmodule HeBroker.RouteMap do
   """
   def upsert_topic(routemap, topic, pid, cast, call) do
     same_service? = fn
-      %Service{cast: ^cast, call: ^call} -> true
-      _ -> false
+      %Service{cast: ^cast, call: ^call} ->
+        true
+      _ ->
+        false
     end
 
     services =

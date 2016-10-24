@@ -14,12 +14,17 @@ defmodule HeBroker.PryTest do
   end
 
   test "pries requests", %{broker: broker} do
-    ConsumerHelper.spawn_consumer(broker, "foo", cast: fn _, _, _, _ -> :ok end)
+    me = self()
+
+    ConsumerHelper.spawn_consumer(broker, "foo", cast: fn _, _, _, _ -> send me, :ping end)
 
     request1 = Publisher.cast(broker, "bar", :ping)
-    assert 0 === Pry.messages_sent(request1)
-
     request2 = Publisher.cast(broker, "foo", :ping)
+
+    # Yes, testing async things is hard
+    assert_receive :ping
+
+    assert 0 === Pry.messages_sent(request1)
     assert 1 === Pry.messages_sent(request2)
   end
 
@@ -28,17 +33,8 @@ defmodule HeBroker.PryTest do
       send pid, {message, request}
     end
     loop_factory = fn send_to ->
-      fn ->
-        loop = fn loop ->
-          receive do
-            {:ping, request} ->
-              Publisher.cast(broker, send_to, :ping, request: request)
-
-              loop.(loop)
-          end
-        end
-
-        loop.(loop)
+      fn {:ping, request} ->
+        Publisher.cast(broker, send_to, :ping, request: request)
       end
     end
 
@@ -74,19 +70,10 @@ defmodule HeBroker.PryTest do
       end
     end
     loop_factory = fn send_to ->
-      fn ->
-        loop = fn loop ->
-          receive do
-            {:ping, request} ->
-              send_to
-              |> List.wrap()
-              |> Enum.each(&Publisher.cast(broker, &1, :ping, request: request))
-
-              loop.(loop)
-          end
-        end
-
-        loop.(loop)
+      fn {:ping, request} ->
+        send_to
+        |> List.wrap()
+        |> Enum.each(&Publisher.cast(broker, &1, :ping, request: request))
       end
     end
 
@@ -128,7 +115,13 @@ defmodule HeBroker.PryTest do
     #
     # TOTAL: 9 messages (* there is no consumer for topic "zab", so it won't count as a message sent)
     # TOPICS: foo bar zab baz test abc def
+
+    ## Only those that were received
     assert 9 === Pry.messages_sent(request)
-    assert Enum.sort(~w/foo bar zab baz test abc def/) === Enum.sort(Pry.topics(request, unique: true))
+    assert Enum.sort(~w/foo bar baz test abc def/) === Enum.sort(Pry.topics(request, unique: true))
+
+    ## Including "lost" messages
+    assert 10 === Pry.messages_sent(request, include_lost: true)
+    assert Enum.sort(~w/foo bar baz zab test abc def/) === Enum.sort(Pry.topics(request, unique: true, include_lost: true))
   end
 end

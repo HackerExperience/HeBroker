@@ -89,3 +89,5 @@ end
 - [ ] Rename `client` and `producer` to `publisher`
 - [ ] License
 - [ ] Proper documentation (with examples)
+- [ ] Move the prying flow to a different library to reduce cognitive load on reading the source
+- [ ] Consider if Erlang's Trace Tool Builder is of any use for `HeBroker.Pry`

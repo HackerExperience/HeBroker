@@ -8,9 +8,9 @@ defmodule HeBroker.ConsumerTest do
   alias HeBroker.TestHelper.Consumer, as: ConsumerHelper
 
   setup do
-    {:ok, pid} = Broker.start_link()
+    {:ok, broker} = Broker.start_link()
 
-    {:ok, broker: pid}
+    {:ok, broker: broker}
   end
 
   defp test_callbacks do
@@ -73,38 +73,37 @@ defmodule HeBroker.ConsumerTest do
           Consumer.subscribe(broker, "test", callbacks)
       end
     end
+
+    test "only one callback is required", %{broker: broker} do
+      callbacks = [cast: fn _, _, _, _ -> :ok end]
+      Consumer.subscribe(broker, "test1", callbacks)
+      assert Broker.subscribed?(broker, self(), "test1")
+
+      callbacks = [call: fn _, _, _, _ -> :noreply end]
+      Consumer.subscribe(broker, "test2", callbacks)
+      assert Broker.subscribed?(broker, self(), "test2")
+    end
   end
 
   describe "messaging" do
-    test "message is round-robin-ed", %{broker: broker} do
+    test "message is round-robin'ed", %{broker: broker} do
       me = self()
+      callback = [cast: fn pid, _, message, _ -> send pid, message end]
 
-      ycombinator_factory = fn identifier ->
-        fn ->
-          loop = fn loop ->
-            receive do
-              message ->
-                send me, {:y, identifier, message}
-                loop.(loop)
-            end
-          end
+      # Two different consumers that will relay all received messages to the test
+      # process with their respective identifiers so we can ensure that the requests
+      # are round-robin'ed
+      ConsumerHelper.spawn_consumer(broker, "test", callback, &send(me, {:y, :y1, &1}))
+      ConsumerHelper.spawn_consumer(broker, "test", callback, &send(me, {:y, :y2, &1}))
 
-          loop.(loop)
-        end
-      end
-
-      ycombinator1 = ycombinator_factory.(:y3)
-      ycombinator2 = ycombinator_factory.(:y2)
-
-      cast_callback = fn pid, _, message, _ -> send pid, message end
-
-      ConsumerHelper.spawn_consumer(broker, "test", [cast: cast_callback], ycombinator1)
-      ConsumerHelper.spawn_consumer(broker, "test", [cast: cast_callback], ycombinator2)
-
+      # 1. Let's send three different messages
       Publisher.cast(broker, "test", :foo)
       Publisher.cast(broker, "test", :bar)
       Publisher.cast(broker, "test", :baz)
 
+      # 2. Let's send three more messages but using different processes to ensure
+      # that the round-robin is global and not local (note: the `:ping` is used
+      # to ensure that the requests are sequential)
       spawn_publisher = fn message ->
         me = self()
         spawn fn ->
@@ -123,17 +122,16 @@ defmodule HeBroker.ConsumerTest do
       spawn_publisher.(:lol)
       spawn_publisher.(:bbq)
 
+      # Let's check that every message was correctly received
       assert_receive {:y, y1, :foo}
       assert_receive {:y, y2, :bar}
-      assert_receive {:y, y3, :baz}
-      assert_receive {:y, y4, :kek}
-      assert_receive {:y, y5, :lol}
-      assert_receive {:y, y6, :bbq}
-      assert y1 === y3
-      assert y1 === y5
-      assert y2 === y4
-      assert y2 === y6
-      assert y1 !== y2
+      assert y1 != y2
+
+      # And ensure that the requests were distributed equally between them
+      assert_receive {:y, ^y1, :baz}
+      assert_receive {:y, ^y2, :kek}
+      assert_receive {:y, ^y1, :lol}
+      assert_receive {:y, ^y2, :bbq}
     end
   end
 end

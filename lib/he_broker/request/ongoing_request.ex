@@ -1,5 +1,6 @@
 defmodule HeBroker.Request.OngoingRequest do
 
+  alias HeBroker.Publisher
   alias HeBroker.Request.Reply
 
   @opaque t :: %__MODULE__{}
@@ -7,8 +8,10 @@ defmodule HeBroker.Request.OngoingRequest do
   defstruct [:task, :request]
 
   @doc false
-  def start(callbacks, message, request) do
-    task = Task.async(__MODULE__, :main_task, [callbacks, message, request])
+  def start(callbacks, message, request, topic) do
+    task = Task.async fn ->
+      handler(callbacks, message, request, topic)
+    end
 
     %__MODULE__{task: task, request: request}
   end
@@ -32,31 +35,29 @@ defmodule HeBroker.Request.OngoingRequest do
     do: Task.shutdown(ongoing_request.task, :brutal_kill)
 
   @doc false
-  def main_task(callbacks, message, request) do
+  def handler(callbacks, message, request, topic) do
     me = self()
 
     Enum.each(callbacks, fn callback ->
       spawn fn ->
-        sub_task(me, callback, message, request)
+        worker(me, callback, message, request, topic)
       end
     end)
 
-    wait_loop()
-  end
-
-  defp sub_task(main_task, callback, message, request) do
-    case callback.(message, request) do
-      :noreply ->
-        :ok
-      {:reply, reply} ->
-        send main_task, {:"$hebroker", :reply, reply, request}
-    end
-  end
-
-  defp wait_loop do
     receive do
       {:"$hebroker", :reply, reply, request} ->
         Reply.new(request, reply)
+    end
+  end
+
+  defp worker(reply_to, partial, message, request, topic) do
+    {dest_req, callback} = Publisher.prepare_callback(partial, topic, message, request)
+
+    case callback.() do
+      :noreply ->
+        :ok
+      {:reply, reply} ->
+        send reply_to, {:"$hebroker", :reply, reply, dest_req}
     end
   end
 end

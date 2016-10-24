@@ -1,90 +1,117 @@
 defmodule HeBroker.Pry do
 
-  alias HeBroker.Request, warn: false
+  alias HeBroker.Request
   alias HeBroker.Pry.Pryer
   alias HeBroker.Pry.Just
   alias HeBroker.Pry.Dont
 
+  alias HeBroker.Pry.MessageLost
+
   @active? Application.get_env(:hebroker, :debug, Mix.env in [:test, :dev])
+  @processor @active? && Just || Dont
 
-  @doc """
-  Annotates on the Pryer that a message was received
-  """
-  def pry_origin_request(request) do
-    if @active? do
-      Just.pry_origin_request(request)
-    else
-      Dont.pry_origin_request(request)
-    end
-  end
+  @spec pry_origin_request(Request.t) :: Request.t
+  defdelegate pry_origin_request(request),
+    to: @processor
 
+  @spec pry_sent(Request.t, Request.t, String.t, term) :: Request.t
   @doc """
   Annotates on the Pryer that a message is being sent
   """
-  def pry_sent(callbacks, method, broker, topic, message, request) do
-    if @active? do
-      Just.pry_sent(callbacks, method, broker, topic, message, request)
-    else
-      Dont.pry_sent(callbacks, method, broker, topic, message, request)
-    end
-  end
+  defdelegate pry_sent(sent_request, original_request, topic, message),
+    to: @processor
+
+  @spec pry_maybe_message_lost([RouteMap.partial], Publisher.topic, Publisher.message, Request.t) :: [RouteMap.partial]
+  @doc """
+  Checks if there is any callback on the current topic, if none is found,
+  annotates that the message was lost
+  """
+  def pry_maybe_message_lost(partials, topic, message, request)
+
+  def pry_maybe_message_lost([], topic, message, request),
+    do: @processor.pry_maybe_message_lost(topic, message, request)
+  def pry_maybe_message_lost(partials, _, _, _),
+    do: partials
 
   @spec topics(Request.t, Keyword.t) :: [String.t]
   @doc """
   Returns an unsorted list of topics that the derived from the original request
 
-  `:unique` can be passed as a `opts` to remove repeated topics
-
-  Note that this will include the topic where the original message was sent to
+  `opts` accepts the following values:
+  - `:unique` can be passed as `true` to remove repeated topics
+  - `:include_lost` can be passed as a `true` to also include messages that were
+  lost (ie: sent to a topic without able consumers)
   """
   def topics(%Request{message_id: mid}, opts \\ []) do
     g = Pryer.graph
 
+    reject_lost? = not Keyword.get(opts, :include_lost, false)
+    unique? = Keyword.get(opts, :unique, false)
+
     topics =
-      :digraph_utils.reachable([mid], g)
+      :digraph_utils.reachable_neighbours([mid], g)
       |> Enum.map(&(:digraph.vertex(g, &1) |> elem(1)))
+      |> maybe_reject_lost(reject_lost?)
       |> Enum.map(&Map.fetch!(&1, :topic))
 
-    if Keyword.get(opts, :unique, false) do
-      Enum.uniq(topics)
-    else
-      topics
-    end
+    if unique?,
+      do: Enum.uniq(topics),
+      else: topics
   end
 
   @spec messages_sent(Request.t, Keyword.t) :: non_neg_integer
+  @doc """
+  Returns the count of messages sent derived from the original request
+
+  `opts` accepts the following values:
+  - `:immediate`, if true returns only the count of messages sent using this
+  request as immediate origin
+  - `:include_lost`, if true also includes messages that were lost (ie: sent to
+  a topic without able consumers)
+  """
   def messages_sent(%Request{message_id: mid}, opts \\ []) do
     g = Pryer.graph
 
-    vertices = if Keyword.get(opts, :immediate, false) do
-      :digraph.out_neighbours(g, mid)
-    else
-      :digraph_utils.reachable([mid], g)
-    end
+    reject_lost? = not Keyword.get(opts, :include_lost, false)
+    immediate? = Keyword.get(opts, :immediate, false)
 
-    vertices
+    immediate?
+    && :digraph.out_neighbours(g, mid)
+    || :digraph_utils.reachable_neighbours([mid], g)
     |> Enum.map(&(:digraph.vertex(g, &1) |> elem(1)))
-    |> Enum.map(&Map.fetch!(&1, :consumer_count))
-    |> Enum.reduce(&(&1 + &2))
+    |> maybe_reject_lost(reject_lost?)
+    |> Enum.count()
   end
+
+  @docp """
+  Little helper made to receive a pipelined collection of vertices (actually their
+  labels) and filter them to remove those that represent _lost_ messages (ie:
+  messages sent to a topic without any consumer)
+  """
+  defp maybe_reject_lost(vertices, false),
+    do: vertices
+  defp maybe_reject_lost(vertices, true),
+    do: Enum.reject(vertices, &match?(%MessageLost{}, &1))
+
 
   defmodule Dont do
     @moduledoc false
 
-    def pry_origin_request(request) do
-      request
-    end
-
-    def pry_sent(callbacks, _, _, _, _, _) do
-      callbacks
-    end
+    def pry_origin_request(request),
+      do: request
+    def pry_sent(request, _, _, _),
+      do: request
+    def pry_maybe_message_lost(_, _, _),
+      do: []
   end
+
 
   defmodule Just do
     @moduledoc false
 
     alias HeBroker.Pry.Pryer
     alias HeBroker.Pry.MessageSent
+    alias HeBroker.Pry.MessageLost
 
     def pry_origin_request(request) do
       Pryer.annotate_origin_request(request)
@@ -92,21 +119,27 @@ defmodule HeBroker.Pry do
       request
     end
 
-    def pry_sent(callbacks, method, broker, topic, message, request) do
-      consumers = Enum.count(callbacks)
+    def pry_sent(sent_request, original_request, topic, message) do
+      sent_message = %MessageSent{
+        request: sent_request,
+        message: message,
+        moment: DateTime.utc_now(),
+        topic: topic}
 
-      message = %MessageSent{
-        broker: broker,
+      Pryer.annotate_sent(original_request, sent_message)
+
+      sent_request
+    end
+
+    def pry_maybe_message_lost(topic, message, request) do
+      lost_message = %MessageLost{
         topic: topic,
         message: message,
-        method: method,
-        request: request,
-        publisher: self(),
-        consumer_count: consumers}
+        moment: DateTime.utc_now()}
 
-      Pryer.annotate_sent(message)
+      Pryer.annotate_lost(request, lost_message)
 
-      callbacks
+      []
     end
   end
 end

@@ -1,6 +1,7 @@
 defmodule HeBroker.Publisher do
 
   alias HeBroker.Request
+  alias HeBroker.RouteMap
   alias HeBroker.Request.Reply
   alias HeBroker.Request.OngoingRequest
   alias HeBroker.Pry
@@ -27,14 +28,14 @@ defmodule HeBroker.Publisher do
       |> Keyword.get(:request)
       |> Request.init(Keyword.get(params, :headers))
       |> Pry.pry_origin_request()
-      |> Request.bounce(topic)
 
     broker
     |> HeBroker.Broker.cast_callbacks(topic)
-    |> Pry.pry_sent(:cast, broker, topic, message, request)
-    |> Enum.each(fn callback ->
+    |> Pry.pry_maybe_message_lost(topic, message, request)
+    |> Enum.each(fn partial ->
       spawn fn ->
-        callback.(message, request)
+        {_request, callback} = prepare_callback(partial, topic, message, request)
+        callback.()
       end
     end)
 
@@ -71,12 +72,11 @@ defmodule HeBroker.Publisher do
       |> Keyword.get(:request)
       |> Request.init(Keyword.get(params, :headers))
       |> Pry.pry_origin_request()
-      |> Request.bounce(topic)
 
     broker
     |> HeBroker.Broker.call_callbacks(topic)
-    |> Pry.pry_sent(:call, broker, topic, message, request)
-    |> OngoingRequest.start(message, request)
+    |> Pry.pry_maybe_message_lost(topic, message, request)
+    |> OngoingRequest.start(message, request, topic)
   end
 
   @spec await(OngoingRequest.t, non_neg_integer | :infinity) :: Reply.t
@@ -111,4 +111,19 @@ defmodule HeBroker.Publisher do
   """
   defdelegate ignore(request),
     to: OngoingRequest, as: :shutdown
+
+  @spec prepare_callback(RouteMap.partial, topic, message, Request.t) :: {Request.t, (() -> RouteMap.callback_return)}
+  @doc false
+  def prepare_callback(partial, topic, message, request) do
+    dest_request =
+      request
+      |> Request.bounce(topic)
+      |> Pry.pry_sent(request, topic, message)
+
+    callback = fn ->
+      partial.(topic, message, dest_request)
+    end
+
+    {dest_request, callback}
+  end
 end

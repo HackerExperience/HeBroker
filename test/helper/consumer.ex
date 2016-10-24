@@ -2,14 +2,14 @@ defmodule HeBroker.TestHelper.Consumer do
 
   alias HeBroker.Consumer
 
-  def spawn_consumer(broker, topic, callbacks, loop \\ default_loop()) do
+  def spawn_consumer(broker, topic, callbacks, function \\ fn _msg -> :ok end) do
     me = self()
 
     consumer = spawn fn ->
       Consumer.subscribe(broker, topic, callbacks)
 
       send me, {:"UP", self()}
-      loop.()
+      loop(function)
     end
 
     receive do
@@ -32,11 +32,36 @@ defmodule HeBroker.TestHelper.Consumer do
     end
   end
 
-  defp default_loop do
-    fn ->
+  @docp """
+  Produces a loop function for `spawn_consumer/4`.
+
+  Acceps a 1-fun as a param. That function will be executed everytime that a
+  message is received by the consumer; that function will receive the message
+  as a param
+
+  ## Example
+      me = self()
+
+      callbacks = [cast: fn pid, _, message, request -> send pid, {request, message} end]
+      function = fn msg -> send me, {:consumed, msg} end
+
+      spawn_consumer(UniversalBroker, "foo", callbacks, function)
+
+      UniversalBroker.cast("foo", {"some", "message"})
+      UniversalBroker.cast("foo", :something)
+
+      assert_receive {:consumed, {%Request{}, {"some", "message"}}}
+      assert_receive {:consumed, {%Request{}, :something}}
+  """
+  defp loop(function) do
+    loop = fn loop ->
       receive do
-        _ -> :ok
+        message ->
+          function.(message)
+          loop.(loop)
       end
     end
+
+    loop.(loop)
   end
 end
