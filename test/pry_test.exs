@@ -89,13 +89,11 @@ defmodule HeBroker.PryTest do
     # BRANCH A.2
     ConsumerHelper.spawn_consumer(broker, "def", [cast: callback.()], loop_factory.("test"))
 
-    # We will consume the topic "test" so we can know when the request is completed
-    Consumer.subscribe(broker, "test", cast: callback.())
-
     request = Publisher.cast(broker, "foo", :ping)
 
-    who_will_message_us = ~w/baz abc def/
-    Enum.each(who_will_message_us, fn _ -> assert_receive {:ping, _} end)
+    # Every 3ms check if the tree expanded, stops when tree doesn't seem to
+    # expand anymore. Fails if take more than 3s
+    Pry.wait_expansion(request, 3_000, 3)
 
     # THE REQUEST TREE
     #
@@ -105,20 +103,20 @@ defmodule HeBroker.PryTest do
     # |   | - [bar]
     # |       | - [zab]*
     # |       | - [baz]
-    # |           | - [test]
+    # |           | - [test]*
     # |
     # | - [foo]
     #     | - [abc]
-    #     |   | - [test]
+    #     |   | - [test]*
     #     | - [def]
-    #         | - [test]
+    #         | - [test]*
     #
-    # TOTAL: 9 messages (* there is no consumer for topic "zab", so it won't count as a message sent)
-    # TOPICS: foo(2 msgs) bar baz zab(0 msgs) test(3 msgs) abc def
+    # TOTAL: 6 messages (* there is no consumer for topics "zab" and "test", so it won't count as a message sent)
+    # TOPICS: foo bar baz zab test abc def
 
     ## Only those that were received
-    assert 9 === Pry.messages_sent(request)
-    assert Enum.sort(~w/foo bar baz test abc def/) === Enum.sort(Pry.topics(request, unique: true))
+    assert 6 === Pry.messages_sent(request)
+    assert Enum.sort(~w/foo bar baz abc def/) === Enum.sort(Pry.topics(request, unique: true))
 
     ## Including "lost" messages
     assert 10 === Pry.messages_sent(request, include_lost: true)

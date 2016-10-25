@@ -82,6 +82,58 @@ defmodule HeBroker.Pry do
     |> Enum.count()
   end
 
+  @doc """
+  Waits `timeout` for the request to expand it's chain reaction tree.
+
+  Does so by checking if the tree expanded every `step_cooldown` ms, if the count
+  of messages sent (including lost) between two checks is the same, this function
+  assumes that the chain reaction tree is as expanded as possible.
+
+  If your chain reaction tree has heavy operations that can take quite some time,
+  it is advised to increase the `step_cooldown`
+
+  ## Example
+
+  ### Simple universe of effects
+  ```
+      broker
+      |> Publisher.cast("chain:reaction:small", :doit)
+      |> Pry.wait_expansion()
+      |> Pry.messages_sent()
+      |> Kernel.>=(5)
+      |> assert
+  ```
+
+  ### Universe of effects with heavy-load functions
+  ```
+      broker
+      |> Publisher.cast("chain:reaction:humongous", :doit)
+      |> Pry.wait_expansion(60_000, 1_000)
+      |> Pry.messages_sent()
+      |> Kernel.>=(50)
+      |> assert
+  """
+  def wait_expansion(%Request{message_id: mid}, timeout \\ 15_000, step_cooldown \\ 250) do
+    g = Pryer.graph
+
+    task = Task.async fn ->
+      loop = fn loop, count ->
+        count2 = :digraph_utils.reachable_neighbours([mid], g) |> Enum.count()
+
+        if count === count2 do
+          :ok
+        else
+          :timer.sleep(step_cooldown)
+          loop.(loop, count2)
+        end
+      end
+
+      loop.(loop, 0)
+    end
+
+    Task.await(task, timeout)
+  end
+
   @docp """
   Little helper made to receive a pipelined collection of vertices (actually their
   labels) and filter them to remove those that represent _lost_ messages (ie:
