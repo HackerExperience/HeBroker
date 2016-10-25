@@ -1,7 +1,6 @@
 defmodule HeBroker.Request.OngoingRequest do
 
   alias HeBroker.Publisher
-  alias HeBroker.Request.Reply
 
   @opaque t :: %__MODULE__{}
 
@@ -46,7 +45,7 @@ defmodule HeBroker.Request.OngoingRequest do
 
     receive do
       {:"$hebroker", :reply, reply, request} ->
-        Reply.new(request, reply)
+        {request, reply}
     end
   end
 

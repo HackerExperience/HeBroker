@@ -2,7 +2,6 @@ defmodule HeBroker.Publisher do
 
   alias HeBroker.Request
   alias HeBroker.RouteMap
-  alias HeBroker.Request.Reply
   alias HeBroker.Request.OngoingRequest
   alias HeBroker.Pry
 
@@ -13,6 +12,7 @@ defmodule HeBroker.Publisher do
     {:timeout, non_neg_integer | :infinity},
     {:request, Request.t},
     {:headers, Keyword.t}]
+  @type call_reply :: {Request.t, reply :: term}
 
   @default_timeout 15_000
 
@@ -42,7 +42,7 @@ defmodule HeBroker.Publisher do
     request
   end
 
-  @spec call(broker, topic, message, params) :: Reply.t
+  @spec call(broker, topic, message, params) :: call_reply
   @doc """
   Sends `message` to all applications subscribed to `topic` using their defined
   call functions expecting a return
@@ -79,7 +79,7 @@ defmodule HeBroker.Publisher do
     |> OngoingRequest.start(message, request, topic)
   end
 
-  @spec await(OngoingRequest.t, non_neg_integer | :infinity) :: Reply.t
+  @spec await(OngoingRequest.t, non_neg_integer | :infinity) :: call_reply
   @doc """
   Waits `timeout` for the `request` to reply
 
@@ -89,7 +89,7 @@ defmodule HeBroker.Publisher do
   defdelegate await(request, timeout \\ @default_timeout),
     to: OngoingRequest
 
-  @spec yield(OngoingRequest.t, non_neg_integer) :: {:ok, Reply.t} | nil
+  @spec yield(OngoingRequest.t, non_neg_integer) :: {:ok, call_reply} | nil
   @doc """
   Waits `timeout` for the `request` to return a reply
 
@@ -98,7 +98,7 @@ defmodule HeBroker.Publisher do
   defdelegate yield(request, timeout \\ @default_timeout),
     to: OngoingRequest
 
-  @spec ignore(OngoingRequest.t) :: Reply.t
+  @spec ignore(OngoingRequest.t) :: call_reply
   @doc """
   Ignores the possible return from an ongoing async request
 

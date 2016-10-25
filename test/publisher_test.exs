@@ -63,9 +63,9 @@ defmodule HeBroker.PublisherTest do
 
       assert 2 === Broker.count_services_on_topic(broker, topic)
 
-      reply = Publisher.call(broker, topic, :yay, timeout: 1000)
+      {_request, reply} = Publisher.call(broker, topic, :yay, timeout: 1000)
 
-      assert 1 === reply.reply or 2 === reply.reply
+      assert 1 === reply or 2 === reply
       assert_received {:received, 1}
       assert_received {:received, 2}
       refute_received _ # Ensure that no garbage was sent to our mailbox

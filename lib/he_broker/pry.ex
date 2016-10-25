@@ -27,7 +27,6 @@ defmodule HeBroker.Pry do
   annotates that the message was lost
   """
   def pry_maybe_message_lost(partials, topic, message, request)
-
   def pry_maybe_message_lost([], topic, message, request),
     do: @processor.pry_maybe_message_lost(topic, message, request)
   def pry_maybe_message_lost(partials, _, _, _),

@@ -114,7 +114,7 @@ defmodule HeBroker.PryTest do
     #         | - [test]
     #
     # TOTAL: 9 messages (* there is no consumer for topic "zab", so it won't count as a message sent)
-    # TOPICS: foo bar zab baz test abc def
+    # TOPICS: foo(2 msgs) bar baz zab(0 msgs) test(3 msgs) abc def
 
     ## Only those that were received
     assert 9 === Pry.messages_sent(request)
@@ -123,5 +123,10 @@ defmodule HeBroker.PryTest do
     ## Including "lost" messages
     assert 10 === Pry.messages_sent(request, include_lost: true)
     assert Enum.sort(~w/foo bar baz zab test abc def/) === Enum.sort(Pry.topics(request, unique: true, include_lost: true))
+
+    all = Enum.sort(Pry.topics(request, include_lost: true))
+
+    assert 3 === all |> Enum.filter(&(&1 === "test")) |> Enum.count()
+    assert 2 === all |> Enum.filter(&(&1 === "foo")) |> Enum.count()
   end
 end

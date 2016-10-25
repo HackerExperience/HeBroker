@@ -83,6 +83,28 @@ defmodule HeBroker.ConsumerTest do
       Consumer.subscribe(broker, "test2", callbacks)
       assert Broker.subscribed?(broker, self(), "test2")
     end
+
+    test "refuses non-string topics", %{broker: broker} do
+      invalid_topics = [
+        :invalidtopic,
+        {:invalidtopic},
+        {:invalid, :topic},
+        %{invalid: :topic},
+        %{invalid: "topic"},
+        %{"invalid" => :topic},
+        %{"invalid" => "topic"},
+        {"invalid:topic"},
+        ["invalid:topic"],
+        ["invalid", "topic"],
+        11
+      ]
+
+      Enum.each(invalid_topics, fn topic ->
+        assert_raise FunctionClauseError, fn ->
+          Consumer.subscribe(broker, topic, test_callbacks)
+        end
+      end)
+    end
   end
 
   describe "messaging" do
