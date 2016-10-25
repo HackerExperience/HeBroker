@@ -5,6 +5,8 @@ defmodule HeBroker.Pry do
   alias HeBroker.Pry.Just
   alias HeBroker.Pry.Dont
 
+  alias HeBroker.Pry.MessageRelayed
+  alias HeBroker.Pry.MessageSent
   alias HeBroker.Pry.MessageLost
 
   @active? Application.get_env(:hebroker, :debug, Mix.env in [:test, :dev])
@@ -82,6 +84,7 @@ defmodule HeBroker.Pry do
     |> Enum.count()
   end
 
+  @spec wait_expansion(Request.t, non_neg_integer, non_neg_integer) :: Request.t
   @doc """
   Waits `timeout` for the request to expand it's chain reaction tree.
 
@@ -113,7 +116,7 @@ defmodule HeBroker.Pry do
       |> Kernel.>=(50)
       |> assert
   """
-  def wait_expansion(%Request{message_id: mid}, timeout \\ 15_000, step_cooldown \\ 250) do
+  def wait_expansion(r = %Request{message_id: mid}, timeout \\ 15_000, step_cooldown \\ 250) do
     g = Pryer.graph
 
     task = Task.async fn ->
@@ -132,6 +135,35 @@ defmodule HeBroker.Pry do
     end
 
     Task.await(task, timeout)
+    r
+  end
+
+  @spec branches(Request.t, Keyword.t) :: [[Request.t | MessageLost.t | MessageSent.t] | [topic :: String.t]]
+  def branches(%Request{message_id: mid}, opts \\ []) do
+    g = Pryer.graph
+
+    [mid]
+    |> :digraph_utils.reachable(g)
+    |> Enum.map(&:digraph.vertex(g, &1))
+    |> Enum.filter(&(match?({_, %MessageLost{}}, &1) or match?({_, %MessageSent{}}, &1)))
+    |> Enum.map(&elem(&1, 0))
+    |> Enum.map(fn request_id ->
+      g
+      |> :digraph.get_path(mid, request_id)
+      |> Enum.map(&:digraph.vertex(g, &1))
+      |> Enum.map(&elem(&1, 1))
+    end)
+    |> maybe_simplify_branches(Keyword.get(opts, :simplify, true), not Keyword.get(opts, :include_lost, false))
+    |> rename_structs_from_branch()
+    |> make_branch_date_string()
+  end
+
+  @spec root_count() :: non_neg_integer
+  def root_count do
+    g = Pryer.graph
+
+    :digraph.out_edges(g, :mu)
+    |> Enum.count()
   end
 
   @docp """
@@ -144,6 +176,44 @@ defmodule HeBroker.Pry do
   defp maybe_reject_lost(vertices, true),
     do: Enum.reject(vertices, &match?(%MessageLost{}, &1))
 
+  defp maybe_simplify_branches(branches, false, _),
+    do: branches
+  defp maybe_simplify_branches(branches, true, reject_lost?) do
+    branches
+    |> Enum.map(fn branch ->
+      branch
+      |> Enum.reject(&(match?(%Request{}, &1)))
+      |> Enum.reject(&(reject_lost? and match?(%MessageLost{}, &1)))
+      |> Enum.map(&(&1.topic))
+    end)
+    |> Enum.reject(&(&1 == []))
+  end
+
+  defp rename_structs_from_branch(branches) do
+    branches
+    |> Enum.map(fn branch ->
+      branch
+      |> Enum.map(fn
+        m = %MessageRelayed{} ->
+          Map.put(m, :__struct__, MessageSent)
+        x ->
+          x
+      end)
+    end)
+  end
+
+  defp make_branch_date_string(branches) do
+    branches
+    |> Enum.map(fn branch ->
+      branch
+      |> Enum.map(fn
+        m = %{moment: moment} ->
+          Map.put(m, :moment, DateTime.to_string(moment))
+        m ->
+          m
+      end)
+    end)
+  end
 
   defmodule Dont do
     @moduledoc false
