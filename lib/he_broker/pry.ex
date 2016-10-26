@@ -143,24 +143,22 @@ defmodule HeBroker.Pry do
 
   @spec branches(Request.t, Keyword.t) :: [[Request.t | MessageLost.t | MessageSent.t] | [topic :: String.t]]
   @doc """
-  Returns all _branches_ of the chain reaction that emanates from the original
+  Returns all _branches_ of the chain reaction that stems from the original
   request
 
   Does so by collecting all vertices that are reachable from the original request,
   filtering those that are leafs and rebuilding their path.
 
-  Thus, this function will return a collection of lists containing the `topics`
-  that where in the path between the original request and the leaf (last request)
+  Thus, this function will return a collection of collections of vertices that
+  where in the path between the original request and the leaf (last request)
 
-  Note that the list of topics is sorted as [v1, ..., v2] and the collection of
-  vertices lists is not sorted
+  Note that the collection of vertices is sorted as [v1, ..., v2] and the
+  collection of vertices collections is not sorted
 
   `opts` is a proplist whose possible values are
   - `{:simplify, boolean}`, if true (default), will replace all vertices with
   their topic names, remove the origin request and possibly remove all _message_lost_
   vertices
-  - `{:include_lost, boolean}`, if false (default) will remove all _message_lost_
-  vertices IF `simplify` is true
 
   ### Examples
   ```
@@ -184,12 +182,9 @@ defmodule HeBroker.Pry do
       # foo -> ooo
 
       Pry.branches(request)
-      # [["foo", "baz", "zab"], ["foo", "bar", "foobar"], ["foo", "ooo"]]
-
-      Pry.branches(request, include_lost: true)
       # [["foo", "bar", "foobar"], ["foo", "ooo"], ["foo", "baz", "zab", "abc"]]
 
-      Pry.branches(request, simplify: false, include_lost: true)
+      Pry.branches(request, simplify: false)
       # [
       #   [
       #     %HeBroker.Request{},
@@ -207,66 +202,31 @@ defmodule HeBroker.Pry do
       #     %HeBroker.Pry.MessageSent{},
       #     %HeBroker.Pry.MessageLost{}]]
 
-      Pry.branches(request, simplify: false)
-      # [
-      #   [
-      #     %HeBroker.Request{},
-      #     %HeBroker.Pry.MessageSent{},
-      #     %HeBroker.Pry.MessageSent{},
-      #     %HeBroker.Pry.MessageSent{}],
-      #   [
-      #     %HeBroker.Request{},
-      #     %HeBroker.Pry.MessageSent{},
-      #     %HeBroker.Pry.MessageSent{}],
-      #   [
-      #     %HeBroker.Request{},
-      #     %HeBroker.Pry.MessageSent{},
-      #     %HeBroker.Pry.MessageSent{},
-      #     %HeBroker.Pry.MessageSent{}]]
-
-
       request = Publisher.cast("unavailable", msg)
       # No consumer on topic "unavailable", message lost
 
       Pry.branches(request)
-      # []
-
-      Pry.branches(request, include_lost: true)
       # [["unavailable"]]
 
-      Pry.branches(request, simplify: false, include_lost: true)
-      # [[%HeBroker.Request{}, %HeBroker.Pry.MessageLost{}]]
-
       Pry.branches(request, simplify: false)
-      # [[%HeBroker.Request{}]]
+      # [[%HeBroker.Request{}, %HeBroker.Pry.MessageLost{}]]
   ```
   """
   def branches(%Request{message_id: mid}, opts \\ []) do
     g = Pryer.graph
-
-    reject_lost? = not Keyword.get(opts, :include_lost, false)
 
     [mid]
     |> :digraph_utils.reachable(g)
     |> Enum.map(&:digraph.vertex(g, &1))
     |> Enum.filter(&(match?({_, %MessageLost{}}, &1) or match?({_, %MessageSent{}}, &1)))
     |> Enum.map(fn {request_id, label} ->
-      # If the message was lost and this request asks to reject lost messages,
-      # consider it's parent as the leaf of the tree instead
-      vertex = if reject_lost? and match?(%MessageLost{}, label) do
-        g |> :digraph.in_neighbours(request_id) |> List.first()
-      else
-        request_id
-      end
-
-      vertices = vertex == mid && [mid] || :digraph.get_path(g, mid, vertex)
-
-      vertices
+      g
+      |> :digraph.get_path(mid, vertex)
       |> Enum.map(&:digraph.vertex(g, &1))
       |> Enum.map(&elem(&1, 1))
     end)
     |> Enum.uniq()
-    |> maybe_simplify_branches(Keyword.get(opts, :simplify, true), reject_lost?)
+    |> maybe_simplify_branches(Keyword.get(opts, :simplify, true))
     |> rename_structs_from_branch()
     |> make_branch_date_string()
     |> Enum.reject(&(&1 == []))
@@ -290,14 +250,13 @@ defmodule HeBroker.Pry do
   defp maybe_reject_lost(vertices, true),
     do: Enum.reject(vertices, &match?(%MessageLost{}, &1))
 
-  defp maybe_simplify_branches(branches, false, _),
+  defp maybe_simplify_branches(branches, false),
     do: branches
-  defp maybe_simplify_branches(branches, true, reject_lost?) do
+  defp maybe_simplify_branches(branches, true) do
     branches
     |> Enum.map(fn branch ->
       branch
       |> Enum.reject(&(match?(%Request{}, &1)))
-      |> Enum.reject(&(reject_lost? and match?(%MessageLost{}, &1)))
       |> Enum.map(&(&1.topic))
     end)
   end
