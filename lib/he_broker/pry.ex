@@ -76,9 +76,12 @@ defmodule HeBroker.Pry do
     reject_lost? = not Keyword.get(opts, :include_lost, false)
     immediate? = Keyword.get(opts, :immediate, false)
 
-    immediate?
-    && :digraph.out_neighbours(g, mid)
-    || :digraph_utils.reachable_neighbours([mid], g)
+    vertices =
+      immediate? &&
+      :digraph.out_neighbours(g, mid)
+      || :digraph_utils.reachable_neighbours([mid], g)
+
+    vertices
     |> Enum.map(&(:digraph.vertex(g, &1) |> elem(1)))
     |> maybe_reject_lost(reject_lost?)
     |> Enum.count()
@@ -256,10 +259,9 @@ defmodule HeBroker.Pry do
         request_id
       end
 
-      vertex == mid
-      && [mid]
-      || :digraph.get_path(g, mid, vertex)
-      |> IO.inspect
+      vertices = vertex == mid && [mid] || :digraph.get_path(g, mid, vertex)
+
+      vertices
       |> Enum.map(&:digraph.vertex(g, &1))
       |> Enum.map(&elem(&1, 1))
     end)
