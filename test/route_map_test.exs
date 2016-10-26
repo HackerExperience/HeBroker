@@ -1,6 +1,5 @@
 defmodule HeBroker.RouteMapTest do
-
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   @tag :pending
   test "Insert an application to an inexistent topic"

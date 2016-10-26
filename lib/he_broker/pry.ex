@@ -124,7 +124,7 @@ defmodule HeBroker.Pry do
 
     task = Task.async fn ->
       loop = fn loop, count ->
-        count2 = :digraph_utils.reachable_neighbours([mid], g) |> Enum.count()
+        count2 = :digraph_utils.reachable([mid], g) |> Enum.count()
 
         if count === count2 do
           :ok
@@ -134,7 +134,7 @@ defmodule HeBroker.Pry do
         end
       end
 
-      loop.(loop, 0)
+      loop.(loop, nil)
     end
 
     Task.await(task, timeout)
@@ -219,9 +219,9 @@ defmodule HeBroker.Pry do
     |> :digraph_utils.reachable(g)
     |> Enum.map(&:digraph.vertex(g, &1))
     |> Enum.filter(&(match?({_, %MessageLost{}}, &1) or match?({_, %MessageSent{}}, &1)))
-    |> Enum.map(fn {request_id, label} ->
+    |> Enum.map(fn {request_id, _} ->
       g
-      |> :digraph.get_path(mid, vertex)
+      |> :digraph.get_path(mid, request_id)
       |> Enum.map(&:digraph.vertex(g, &1))
       |> Enum.map(&elem(&1, 1))
     end)

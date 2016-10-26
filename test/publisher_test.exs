@@ -1,6 +1,5 @@
 defmodule HeBroker.PublisherTest do
-
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias HeBroker.Broker
   alias HeBroker.Publisher
@@ -66,8 +65,8 @@ defmodule HeBroker.PublisherTest do
       {_request, reply} = Publisher.call(broker, topic, :yay, timeout: 1000)
 
       assert 1 === reply or 2 === reply
-      assert_received {:received, 1}
-      assert_received {:received, 2}
+      assert_receive {:received, 1}
+      assert_receive {:received, 2}
       refute_received _ # Ensure that no garbage was sent to our mailbox
     end
   end

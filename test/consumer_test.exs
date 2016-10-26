@@ -1,6 +1,5 @@
 defmodule HeBroker.ConsumerTest do
-
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias HeBroker.Broker
   alias HeBroker.Consumer
