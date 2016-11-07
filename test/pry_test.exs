@@ -122,7 +122,7 @@ defmodule HeBroker.PryTest do
       request =
         broker
         |> Publisher.cast("foo", :ping)
-        |> Pry.wait_expansion(3_000, 1)
+        |> Pry.wait_expansion(3_000, 25)
 
 
       # THE REQUEST TREE
@@ -169,7 +169,7 @@ defmodule HeBroker.PryTest do
       branches =
         broker
         |> Publisher.cast("foo", :ping)
-        |> Pry.wait_expansion(3_000, 1)
+        |> Pry.wait_expansion(3_000, 25)
         |> Pry.branches()
         |> sort_branches()
 
@@ -186,7 +186,7 @@ defmodule HeBroker.PryTest do
       branches =
         broker
         |> Publisher.cast("foo", :ping)
-        |> Pry.wait_expansion(3_000, 1)
+        |> Pry.wait_expansion(3_000, 25)
         |> Pry.branches(simplify: false)
         |> sort_branches()
 

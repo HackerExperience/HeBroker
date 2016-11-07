@@ -15,7 +15,7 @@ defmodule HeBroker.Mixfile do
   end
 
   def application do
-    []
+    [applications: [:logger]]
   end
 
   defp deps do
