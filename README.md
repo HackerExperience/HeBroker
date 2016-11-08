@@ -80,8 +80,10 @@ end
 
 ## Todos
 - [ ] Use `:pg2` to allow brokering through the cluster
+- [ ] Use `:mnesia` to distribute the topics between nodes (working like sets on an union)
 - [ ] Use `GenStage` for the consumption flow
-- [ ] Use (D)`ETS` to store the routes
+- [x] Use (D)`ETS` to store the routes
+- [ ] Table heir to recover if broker breaks(?)
 - [ ] Start a process for each and every topic and have the broker simply manage (and refer to) them
 - [ ] Consumer unsubscribe
 - [ ] Pool of consumers dynamically instanciated via `:poolboy`

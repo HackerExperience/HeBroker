@@ -3,7 +3,6 @@ defmodule HeBroker.ConsumerTest do
 
   alias HeBroker.Broker
   alias HeBroker.Consumer
-  alias HeBroker.Publisher
   alias HeBroker.TestHelper.Consumer, as: ConsumerHelper
 
   setup do
@@ -103,56 +102,6 @@ defmodule HeBroker.ConsumerTest do
           Consumer.subscribe(broker, topic, test_callbacks)
         end
       end)
-    end
-  end
-
-  describe "messaging" do
-    test "message is round-robin'ed", %{broker: broker} do
-      me = self()
-      callback = [cast: fn pid, _, message, _ -> send pid, message end]
-
-      # Two different consumers that will relay all received messages to the test
-      # process with their respective identifiers so we can ensure that the requests
-      # are round-robin'ed
-      ConsumerHelper.spawn_consumer(broker, "test", callback, &send(me, {:y, :y1, &1}))
-      ConsumerHelper.spawn_consumer(broker, "test", callback, &send(me, {:y, :y2, &1}))
-
-      # 1. Let's send three different messages
-      Publisher.cast(broker, "test", :foo)
-      Publisher.cast(broker, "test", :bar)
-      Publisher.cast(broker, "test", :baz)
-
-      # 2. Let's send three more messages but using different processes to ensure
-      # that the round-robin is global and not local (note: the `:ping` is used
-      # to ensure that the requests are sequential)
-      spawn_publisher = fn message ->
-        me = self()
-        spawn fn ->
-          Publisher.cast(broker, "test", message)
-
-          send me, :ping
-        end
-
-        receive do
-          :ping -> :ok
-        after 1_000 -> flunk()
-        end
-      end
-
-      spawn_publisher.(:kek)
-      spawn_publisher.(:lol)
-      spawn_publisher.(:bbq)
-
-      # Let's check that every message was correctly received
-      assert_receive {:y, y1, :foo}
-      assert_receive {:y, y2, :bar}
-      assert y1 != y2
-
-      # And ensure that the requests were distributed equally between them
-      assert_receive {:y, ^y1, :baz}
-      assert_receive {:y, ^y2, :kek}
-      assert_receive {:y, ^y1, :lol}
-      assert_receive {:y, ^y2, :bbq}
     end
   end
 end

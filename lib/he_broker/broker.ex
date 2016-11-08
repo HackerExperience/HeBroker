@@ -10,17 +10,20 @@ defmodule HeBroker.Broker do
 
   @typep t :: %__MODULE__{}
 
-  defstruct \
-    routes: %{},
-    consumers: %{by_topic: %{}, by_pid: %{}, monitors: %{}}
+  defstruct [:routes, :consumers]
 
   @spec start_link() :: GenServer.start
   def start_link,
-    do: GenServer.start_link(__MODULE__, [])
+    do: start_link([])
+
+  def start_link(params) when is_list(params),
+    do: GenServer.start_link(__MODULE__, params)
+  def start_link(name) when is_atom(name),
+    do: start_link(name, [])
 
   @spec start_link(atom) :: GenServer.start
-  def start_link(name),
-    do: GenServer.start_link(__MODULE__, [], name: name)
+  def start_link(name, params),
+    do: GenServer.start_link(__MODULE__, [{:name, name}| params], name: name)
 
   @spec subscribe(pid | atom, topic, consumer_callbacks) :: :ok
   @doc false
@@ -44,12 +47,30 @@ defmodule HeBroker.Broker do
     do: GenServer.call(broker, {:subscribed?, pid})
 
   @spec subscribed?(pid | atom, pid, topic) :: boolean
-  def subscribed?(broker, pid, topic),
-    do: GenServer.call(broker, {:subscribed?, topic, pid})
+  def subscribed?(broker, pid, topic) do
+    broker
+    |> GenServer.call(:consumers_by_topic)
+    |> :ets.lookup(topic)
+    |> case do
+      [{^topic, services}] ->
+        MapSet.member?(services, pid)
+      _ ->
+        false
+    end
+  end
 
   @spec count_services_on_topic(pid | atom, topic) :: non_neg_integer
-  def count_services_on_topic(broker, topic),
-    do: GenServer.call(broker, {:count, :topic, topic})
+  def count_services_on_topic(broker, topic) do
+    broker
+    |> GenServer.call(:consumers_by_topic)
+    |> :ets.lookup(topic)
+    |> case do
+      [{^topic, services}] ->
+        MapSet.size(services)
+      _ ->
+        0
+    end
+  end
 
   @spec cast_callbacks(pid | atom, topic) :: [RouteMap.partial]
   @doc """
@@ -68,113 +89,94 @@ defmodule HeBroker.Broker do
   @spec callbacks(pid | atom, topic, :cast | :call) :: [RouteMap.partial]
   defp callbacks(broker, topic, type) do
     broker
-    |> GenServer.call({:topic, topic})
-    |> List.wrap()
+    |> GenServer.call(:routes)
+    |> RouteMap.services_on_topic(topic)
     |> Enum.map(&RouteMap.callback(&1, type))
     |> Enum.reject(&is_nil/1)
   end
 
   @doc false
-  def init(_),
-    do: {:ok, %__MODULE__{}}
+  def init(route_options) do
+    consumers_by_pid = :ets.new(:hebroker, [])
+    consumers_by_topic = :ets.new(:hebroker, [])
+    routes = RouteMap.new(route_options)
 
-  @spec handle_call({:topic, topic}, {pid, term}, t) :: {:reply, [RouteMap.service], t}
+    {:ok, %__MODULE__{routes: routes, consumers: %{by_pid: consumers_by_pid, by_topic: consumers_by_topic}}}
+  end
+
   @spec handle_call({:subscribed?, pid}, {pid, term}, t) :: {:reply, boolean, t}
   @spec handle_call({:subscribed?, topic, pid}, {pid, term}, t) :: {:reply, boolean, t}
-  @spec handle_call({:count, :topic, topic}, {pid, term}, t) :: {:reply, non_neg_integer, t}
   @doc false
-  def handle_call({:topic, topic}, _caller, state) do
-    {routes, services} = RouteMap.services_on_topic(state.routes, topic)
-
-    {:reply, services, %{state| routes: routes}}
-  end
-
   def handle_call({:subscribed?, pid}, _caller, state) do
-    {:reply, Map.has_key?(state.consumers.by_pid, pid), state}
+    {:reply, :ets.member(state.consumers.by_pid, pid), state}
   end
 
-  def handle_call({:subscribed?, topic, pid}, _caller, state) do
-    topics_for_pid = Map.get(state.consumers.by_pid, pid)
-    subscribed? = topics_for_pid && MapSet.member?(topics_for_pid, topic) || false
-
-    {:reply, subscribed?, state}
-  end
-
-  def handle_call({:count, :topic, topic}, _caller, state) do
-    # REVIEW: maybe move the count part to the client side
-    count = Map.get(state.routes, topic, []) |> Enum.count()
-
-    {:reply, count, state}
-  end
+  def handle_call(:routes, _caller, state),
+    do: {:reply, state.routes, state}
+  def handle_call(:consumers_by_topic, _caller, state),
+    do: {:reply, state.consumers.by_topic, state}
 
   @spec handle_cast({:subscribe, :consumer, topic, consumer_callbacks, pid}, t) :: {:noreply, t}
   @doc false
   def handle_cast({:subscribe, :consumer, topic, callbacks, pid}, state) do
-    cast = Keyword.get(callbacks , :cast)
-    call = Keyword.get(callbacks , :call)
+    cast = Keyword.get(callbacks, :cast)
+    call = Keyword.get(callbacks, :call)
 
-    consumers = monitor_consumer(state.consumers, topic, pid)
+    monitor_consumer(state.consumers, topic, pid)
 
-    routes = RouteMap.upsert_topic(state.routes, topic, pid, cast, call)
+    RouteMap.upsert_topic(state.routes, topic, pid, cast, call)
 
-    {:noreply, %{state| consumers: consumers, routes: routes}}
+    {:noreply, state}
   end
 
   @doc false
-  def handle_info({:DOWN, _ref, _mod, pid, _reason}, state) do
-    topics = Map.fetch!(state.consumers.by_pid, pid)
-    routes = Enum.reduce(topics, state.routes, &RouteMap.remove_consumer(&2, &1, pid))
-    consumers = remove_consumer_from_topics(state.consumers, topics, pid)
+  def handle_info({:DOWN, ref, _mod, pid, _reason}, state) do
+    by_topic = state.consumers.by_topic
+    by_pid = state.consumers.by_pid
 
-    {:noreply, %{state| consumers: consumers, routes: routes}}
+    case :ets.lookup(by_pid, pid) do
+      [{^pid, ^ref, topics}] ->
+        Enum.each(topics, fn topic ->
+          RouteMap.remove_consumer(state.routes, topic, pid)
+
+          case :ets.lookup(by_topic, topic) do
+            [{^topic, services}] ->
+              s2 = MapSet.delete(services, pid)
+              if 0 === MapSet.size(s2) do
+                :ets.delete(by_topic, topic)
+              else
+                :ets.insert(by_topic, {topic, s2})
+              end
+            _ ->
+              :ok
+          end
+        end)
+
+        :ets.delete(by_pid, pid)
+      _ ->
+        :ok
+    end
+
+    {:noreply, state}
   end
 
   @spec monitor_consumer(%{}, topic, pid) :: %{}
   defp monitor_consumer(consumers, topic, pid) do
-    monitor_process = fn -> Process.monitor(pid) end
-    by_pid_update = fn map ->
-      Map.update(map, pid, MapSet.new([topic]), &MapSet.put(&1, topic))
-    end
-    by_topic_update = fn map ->
-      Map.update(map, topic, MapSet.new([pid]), &MapSet.put(&1, pid))
-    end
+    case :ets.lookup(consumers.by_pid, pid) do
+      [{^pid, ref, topics}] ->
+        :ets.insert(consumers.by_pid, {pid, ref, MapSet.put(topics, topic)})
+      [] ->
+        topics = MapSet.new([topic])
+        ref = Process.monitor(pid)
 
-    consumers
-    |> Map.update!(:by_pid, by_pid_update)
-    |> Map.update!(:by_topic, by_topic_update)
-    |> Map.update!(:monitors, &(Map.put_new_lazy(&1, pid, monitor_process)))
-  end
-
-  @spec remove_consumer_from_topics(%{}, [topic], pid) :: %{}
-  defp remove_consumer_from_topics(consumers, topics, pid) do
-    topics_as_set = MapSet.new(topics)
-
-    consumed_topics = Map.fetch!(consumers.by_pid, pid)
-
-    by_pid = if MapSet.equal?(consumed_topics, topics_as_set) do
-      Map.delete(consumers.by_pid, pid)
-    else
-      Map.put(consumers.by_pid, pid, MapSet.difference(consumed_topics, topics_as_set))
+        :ets.insert(consumers.by_pid, {pid, ref, topics})
     end
 
-    by_topic =
-      topics
-      |> Enum.reduce(consumers.by_topic, fn topic, acc ->
-        topic_consumers = Map.fetch!(acc, topic)
-        updated_consumers = MapSet.delete(topic_consumers, pid)
-
-        if MapSet.size(updated_consumers) == 0,
-          do: Map.delete(acc, topic),
-          else: Map.put(acc, topic, updated_consumers)
-      end)
-
-    monitors = if Map.has_key?(by_pid, pid) do
-      consumers.monitors
-    else
-      consumers.monitors |> Map.fetch!(pid) |> Process.demonitor()
-      Map.delete(consumers.monitors, pid)
+    case :ets.lookup(consumers.by_topic, topic) do
+      [{^topic, services}] ->
+        :ets.insert(consumers.by_topic, {topic, MapSet.put(services, pid)})
+      [] ->
+        :ets.insert(consumers.by_topic, {topic, MapSet.new([pid])})
     end
-
-    %{consumers| by_pid: by_pid, by_topic: by_topic, monitors: monitors}
   end
 end

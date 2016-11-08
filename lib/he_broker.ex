@@ -6,7 +6,10 @@ defmodule HeBroker do
 
   @default_timeout 15_000
 
-  defdelegate start_link(name),
+  defdelegate start_link(name_or_params),
+    to: Broker
+
+  defdelegate start_link(name, params),
     to: Broker
 
   defdelegate count_services_on_topic(broker, topic),

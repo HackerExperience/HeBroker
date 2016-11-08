@@ -8,6 +8,9 @@ defmodule HeBroker.GenBroker do
       def start_link,
         do: HeBroker.start_link(@broker)
 
+      def start_link(params),
+        do: HeBroker.start_link(@broker, params)
+
       def count_services_on_topic(topic),
         do: HeBroker.count_services_on_topic(@broker, topic)
 

@@ -4,9 +4,9 @@ defmodule HeBroker.RouteMap do
   subscribed topics so publishers can properly broadcast messages
 
   Each route is composed by a topic (the string that will be used to define which
-  _consumers_ you want to send your message to. eg: "user", "user:create", "email:send")
+  _services_ you want to send your message to. eg: "user", "user:create", "email:send")
   and a collection of _services_. Those _services_ are the consumers of
-  the messages sent to the specified topic. The services are composed oconsumerf a _cast_
+  the messages sent to the specified topic. The services are composed by a _cast_
   function (a function to be executed when the publisher wants to send a message
   to the topic without expecting a return), a _call_ function (a function to be
   executed when the publisher wants to send a message to the topic expecting one
@@ -15,8 +15,7 @@ defmodule HeBroker.RouteMap do
 
   The data representing the routemap should be considered opaque, any code that
   assumes any knowledge about the structure of the routemap is prone to fail since
-  this might change in the future. **ALWAYS USE THE FUNCTIONS ON THIS MODULE TO
-  PROPERLY USE THE ROUTEMAP**
+  this might change in the future.
   """
 
   alias HeBroker.RouteMap.Service
@@ -31,16 +30,19 @@ defmodule HeBroker.RouteMap do
 
   @type topic :: String.t
   @type service :: Service.t
-  @opaque t :: %{topic => [service]}
+  @opaque pool :: :queue.queue(pid) | [pid]
+  @opaque t :: :ets.tid
 
   @spec new() :: t
   @doc """
   Returns a new route map
   """
-  def new,
-    do: %{}
+  def new(params \\ []) do
+    opts = Enum.reject(params, &match?({:name, _}, &1))
+    :ets.new(params[:name] || :hebroker, opts)
+  end
 
-  @spec callback(Service.t, :call | :cast) :: partial
+  @spec callback(Service.t, :call | :cast) :: partial | nil
   @doc """
   Returns a partial based on the service's callback.
 
@@ -55,38 +57,29 @@ defmodule HeBroker.RouteMap do
   def callback(%Service{call: call, pool: pool}, :call),
     do: build_partial(call, pool)
 
-  @spec build_partial(cast_fun | call_fun, :queue.queue(pid)) :: partial
+  @spec build_partial(cast_fun | call_fun, pool) :: partial
   @docp """
   Wraps `function` in a partial providing the head pid from `pool`, returning a
   3-fun callback
   """
   defp build_partial(function, pool) do
-    pid = :queue.get(pool)
+    pid = pool_out(pool)
 
     fn topic, message, request ->
       function.(pid, topic, message, request)
     end
   end
 
-  @spec services_on_topic(t, topic) :: {t, [service]}
+  @spec services_on_topic(t, topic) :: [service]
   @doc """
-  Returns the services on `topic` in `routemap`
-
-  Does so by cycling the pool of consumer pids of each services and returning a
-  2-tuple with both the updated routemap and a list of the services on the topic
+  Returns the services on `topic` on `routemap`
   """
   def services_on_topic(routemap, topic) do
-    case routemap do
-      %{^topic => services} ->
-        services = Enum.map(services, fn service ->
-          {{:value, pid}, pool} = :queue.out(service.pool)
-
-          %{service| pool: :queue.in(pid, pool)}
-        end)
-
-        {Map.put(routemap, topic, services), services}
-      _ ->
-        {routemap, []}
+    case :ets.lookup(routemap, topic) do
+      [{^topic, services}] ->
+        services
+      [] ->
+        []
     end
   end
 
@@ -100,37 +93,28 @@ defmodule HeBroker.RouteMap do
   it's pool
   """
   def upsert_topic(routemap, topic, pid, cast, call) do
-    same_service? = fn
-      %Service{cast: ^cast, call: ^call} ->
-        true
-      _ ->
-        false
+    services = case :ets.lookup(routemap, topic) do
+      [{^topic, services}] -> services
+      [] -> []
     end
 
-    services =
-      routemap
-      |> Map.get(topic)
-      |> List.wrap()
-      |> Enum.reduce({[], false}, fn
-        service, {acc, false} ->
-          if same_service?.(service) do
-            s = %Service{service| pool: :queue.in(pid, service.pool)}
-            {[s| acc], true}
-          else
-            {[service| acc], false}
-          end
-        service, {acc, true} ->
-          {[service| acc], true}
+    updated_services =
+      Enum.reduce(services, {[], false}, fn
+        service = %Service{cast: ^cast, call: ^call}, {acc, false} ->
+          s = %Service{service| pool: pool_in(service.pool, pid)}
+          {[s| acc], true}
+        s, {acc, status} ->
+          {[s| acc], status}
       end)
       |> case do
         {services, true} ->
           services
         {services, false} ->
-          s = %Service{cast: cast, call: call, pool: :queue.cons(pid, :queue.new())}
+          s = %Service{cast: cast, call: call, pool: pool_new(pid)}
           [s| services]
       end
 
-    Map.put(routemap, topic, services)
+    :ets.insert(routemap, {topic, updated_services})
   end
 
   @spec remove_consumer(t, topic, consumer :: pid) :: t
@@ -141,15 +125,15 @@ defmodule HeBroker.RouteMap do
   subscribed consumer
   """
   def remove_consumer(routemap, topic, pid) do
-    case Map.fetch(routemap, topic) do
-      {:ok, services} ->
+    case :ets.lookup(routemap, topic) do
+      [{^topic, services}] ->
         services
         |> Enum.reduce([], fn service = %Service{pool: pool}, acc ->
           cond do
-            not :queue.member(pid, pool) ->
+            not pool_member?(pool, pid) ->
               [service| acc]
-            pids2 = :queue.filter(&(&1 != pid), pool) ->
-              if :queue.is_empty(pids2) do
+            pids2 = pool_delete(pool, pid) ->
+              if pool_empty?(pids2) do
                 # Pid was the only element of the pool and the service now doesn't
                 # have any enabled consumer and thus must be removed from the topic
                 acc
@@ -163,12 +147,37 @@ defmodule HeBroker.RouteMap do
           [] ->
             # By removing the consumer, the topic doesn't has any subscribed
             # service consumer anymore
-            Map.delete(routemap, topic)
+            :ets.delete(routemap, topic)
           services ->
-            Map.put(routemap, topic, services)
+            :ets.insert(routemap, {topic, services})
         end
-      :error ->
+      [] ->
         routemap
     end
   end
+
+  defp pool_out(pool) do
+    Enum.random(pool)
+  end
+
+  defp pool_in(pool, pid) do
+    [pid| pool]
+  end
+
+  defp pool_new(pid) do
+    [pid]
+  end
+
+  defp pool_delete(pool, pid) do
+    pool -- [pid]
+  end
+
+  defp pool_member?(pool, pid) do
+    pid in pool
+  end
+
+  defp pool_empty?([]),
+    do: true
+  defp pool_empty?(_),
+    do: false
 end
