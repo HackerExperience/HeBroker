@@ -5,14 +5,12 @@ defmodule HeBroker.Request.TimeoutError do
 
   defexception [:message, :request]
 
-  def exception(opts) do
-    request = Keyword.fetch!(opts, :request)
+  def exception(opts) when is_list(opts) do
+    %__MODULE__{message: "request exceeded timeout", request: opts[:request]}
+  end
 
-    message = """
-    Request #{inspect request.message_id} exceeded timeout
-    """
-
-    %__MODULE__{message: message, request: request}
+  def exception(_) do
+    %__MODULE__{message: "request exceeded timeout"}
   end
 end
 

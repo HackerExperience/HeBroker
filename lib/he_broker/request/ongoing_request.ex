@@ -2,7 +2,7 @@ defmodule HeBroker.Request.OngoingRequest do
 
   alias HeBroker.Publisher
 
-  @opaque t :: %__MODULE__{}
+  @type t :: %__MODULE__{}
 
   defstruct [:task, :request]
 

@@ -16,12 +16,12 @@ defmodule HeBroker.Broker do
   def start_link,
     do: start_link([])
 
+  @spec start_link(atom | [term]) :: GenServer.start
   def start_link(params) when is_list(params),
     do: GenServer.start_link(__MODULE__, params)
   def start_link(name) when is_atom(name),
     do: start_link(name, [])
 
-  @spec start_link(atom) :: GenServer.start
   def start_link(name, params),
     do: GenServer.start_link(__MODULE__, [{:name, name}| params], name: name)
 
@@ -107,14 +107,14 @@ defmodule HeBroker.Broker do
   @spec handle_call({:subscribed?, pid}, {pid, term}, t) :: {:reply, boolean, t}
   @spec handle_call({:subscribed?, topic, pid}, {pid, term}, t) :: {:reply, boolean, t}
   @doc false
-  def handle_call({:subscribed?, pid}, _caller, state) do
-    {:reply, :ets.member(state.consumers.by_pid, pid), state}
-  end
-
+  def handle_call({:subscribed?, pid}, _caller, state),
+    do: {:reply, :ets.member(state.consumers.by_pid, pid), state}
   def handle_call(:routes, _caller, state),
     do: {:reply, state.routes, state}
   def handle_call(:consumers_by_topic, _caller, state),
     do: {:reply, state.consumers.by_topic, state}
+  def handle_call(_, _, state),
+    do: {:noreply, state}
 
   @spec handle_cast({:subscribe, :consumer, topic, consumer_callbacks, pid}, t) :: {:noreply, t}
   @doc false
@@ -128,6 +128,9 @@ defmodule HeBroker.Broker do
 
     {:noreply, state}
   end
+
+  def handle_cast(_, state),
+    do: {:noreply, state}
 
   @doc false
   def handle_info({:DOWN, ref, _mod, pid, _reason}, state) do
@@ -160,23 +163,23 @@ defmodule HeBroker.Broker do
     {:noreply, state}
   end
 
-  @spec monitor_consumer(%{}, topic, pid) :: %{}
-  defp monitor_consumer(consumers, topic, pid) do
-    case :ets.lookup(consumers.by_pid, pid) do
+  @spec monitor_consumer(%{by_pid: RouteMap.t, by_topic: RouteMap.t}, topic, pid) :: no_return
+  defp monitor_consumer(%{by_pid: by_pid, by_topic: by_topic}, topic, pid) do
+    case :ets.lookup(by_pid, pid) do
       [{^pid, ref, topics}] ->
-        :ets.insert(consumers.by_pid, {pid, ref, MapSet.put(topics, topic)})
+        :ets.insert(by_pid, {pid, ref, MapSet.put(topics, topic)})
       [] ->
         topics = MapSet.new([topic])
         ref = Process.monitor(pid)
 
-        :ets.insert(consumers.by_pid, {pid, ref, topics})
+        :ets.insert(by_pid, {pid, ref, topics})
     end
 
-    case :ets.lookup(consumers.by_topic, topic) do
+    case :ets.lookup(by_topic, topic) do
       [{^topic, services}] ->
-        :ets.insert(consumers.by_topic, {topic, MapSet.put(services, pid)})
+        :ets.insert(by_topic, {topic, MapSet.put(services, pid)})
       [] ->
-        :ets.insert(consumers.by_topic, {topic, MapSet.new([pid])})
+        :ets.insert(by_topic, {topic, MapSet.new([pid])})
     end
   end
 end

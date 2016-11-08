@@ -19,18 +19,12 @@ defmodule HeBroker.RouteMap do
   """
 
   alias HeBroker.RouteMap.Service
+  alias HeBroker.Request
 
-  @type expected_call_return :: :noreply | {:reply, any}
-  @type expected_cast_return :: no_return
-  @type callback_return :: expected_call_return | expected_cast_return
-
-  @type cast_fun :: ((consumer :: pid, topic, message :: any, Request.t) -> expected_cast_return)
-  @type call_fun :: ((consumer :: pid, topic, message :: any, Request.t) -> expected_call_return)
-  @type partial :: ((topic, message :: any, Request.t) -> callback_return)
+  @type partial :: ((topic, message :: any, Request.t) -> Service.call_return | Service.cast_return)
 
   @type topic :: String.t
   @type service :: Service.t
-  @opaque pool :: :queue.queue(pid) | [pid]
   @opaque t :: :ets.tid
 
   @spec new() :: t
@@ -57,13 +51,13 @@ defmodule HeBroker.RouteMap do
   def callback(%Service{call: call, pool: pool}, :call),
     do: build_partial(call, pool)
 
-  @spec build_partial(cast_fun | call_fun, pool) :: partial
+  @spec build_partial(Service.cast | Service.call, Service.pool) :: partial
   @docp """
   Wraps `function` in a partial providing the head pid from `pool`, returning a
   3-fun callback
   """
   defp build_partial(function, pool) do
-    pid = pool_out(pool)
+    pid = Service.pool_out(pool)
 
     fn topic, message, request ->
       function.(pid, topic, message, request)
@@ -83,7 +77,7 @@ defmodule HeBroker.RouteMap do
     end
   end
 
-  @spec upsert_topic(t, topic, pid, cast_fun, call_fun) :: t
+  @spec upsert_topic(t, topic, pid, Service.cast, Service.call) :: no_return
   @doc """
   Upserts the service on the `routemap` putting it on the specified `topic`
   using it's defined `cast` and `call` functions.
@@ -94,14 +88,16 @@ defmodule HeBroker.RouteMap do
   """
   def upsert_topic(routemap, topic, pid, cast, call) do
     services = case :ets.lookup(routemap, topic) do
-      [{^topic, services}] -> services
-      [] -> []
+      [{^topic, services}] ->
+        services
+      [] ->
+        []
     end
 
     updated_services =
       Enum.reduce(services, {[], false}, fn
         service = %Service{cast: ^cast, call: ^call}, {acc, false} ->
-          s = %Service{service| pool: pool_in(service.pool, pid)}
+          s = %Service{service| pool: Service.pool_in(service.pool, pid)}
           {[s| acc], true}
         s, {acc, status} ->
           {[s| acc], status}
@@ -110,14 +106,14 @@ defmodule HeBroker.RouteMap do
         {services, true} ->
           services
         {services, false} ->
-          s = %Service{cast: cast, call: call, pool: pool_new(pid)}
+          s = %Service{cast: cast, call: call, pool: Service.pool_new(pid)}
           [s| services]
       end
 
     :ets.insert(routemap, {topic, updated_services})
   end
 
-  @spec remove_consumer(t, topic, consumer :: pid) :: t
+  @spec remove_consumer(t, topic, consumer :: pid) :: no_return
   @doc """
   Removes the specified `pid` from the topic.
 
@@ -129,18 +125,19 @@ defmodule HeBroker.RouteMap do
       [{^topic, services}] ->
         services
         |> Enum.reduce([], fn service = %Service{pool: pool}, acc ->
-          cond do
-            not pool_member?(pool, pid) ->
-              [service| acc]
-            pids2 = pool_delete(pool, pid) ->
-              if pool_empty?(pids2) do
-                # Pid was the only element of the pool and the service now doesn't
-                # have any enabled consumer and thus must be removed from the topic
-                acc
-              else
-                # Pid is removed from the pool and the pool isn't empty
-                [%{service| pool: pids2}| acc]
-              end
+          if Service.pool_member?(pool, pid) do
+            pids2 = Service.pool_delete(pool, pid)
+
+            if Service.pool_empty?(pids2) do
+              # Pid was the only element of the pool and the service now doesn't
+              # have any enabled consumer and thus must be removed from the topic
+              acc
+            else
+              # Pid is removed from the pool and the pool isn't empty
+              [%{service| pool: pids2}| acc]
+            end
+          else
+            [service| acc]
           end
         end)
         |> case do
@@ -152,32 +149,7 @@ defmodule HeBroker.RouteMap do
             :ets.insert(routemap, {topic, services})
         end
       [] ->
-        routemap
+        :ok
     end
   end
-
-  defp pool_out(pool) do
-    Enum.random(pool)
-  end
-
-  defp pool_in(pool, pid) do
-    [pid| pool]
-  end
-
-  defp pool_new(pid) do
-    [pid]
-  end
-
-  defp pool_delete(pool, pid) do
-    pool -- [pid]
-  end
-
-  defp pool_member?(pool, pid) do
-    pid in pool
-  end
-
-  defp pool_empty?([]),
-    do: true
-  defp pool_empty?(_),
-    do: false
 end

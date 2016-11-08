@@ -7,7 +7,7 @@ defmodule HeBroker.Publisher do
 
   @type broker :: pid | atom
   @type topic :: String.t
-  @type message :: term
+  @type message :: any
   @type params :: [
     {:timeout, non_neg_integer | :infinity},
     {:request, Request.t},
@@ -60,7 +60,7 @@ defmodule HeBroker.Publisher do
     |> await(Keyword.get(params, :timeout, @default_timeout))
   end
 
-  @spec async(broker, topic, message, params) :: OngoingRequest.t
+  @spec async(broker, topic, message, Keyword.t) :: OngoingRequest.t
   @doc """
   Starts an asynchronous request to the services subscribed to `topic`.
 
@@ -98,7 +98,7 @@ defmodule HeBroker.Publisher do
   defdelegate yield(request, timeout \\ @default_timeout),
     to: OngoingRequest
 
-  @spec ignore(OngoingRequest.t) :: call_reply
+  @spec ignore(OngoingRequest.t) :: no_return
   @doc """
   Ignores the possible return from an ongoing async request
 
