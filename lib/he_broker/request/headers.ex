@@ -3,10 +3,11 @@ defmodule HeBroker.Request.Headers do
   @type t :: %__MODULE__{
     app_id: any,
     correlation_id: any,
-    reply_to: pid | port | nil
+    reply_to: pid | port | nil,
+    private: %{}
   }
 
-  defstruct [:app_id, :correlation_id, :reply_to]
+  defstruct [:app_id, :correlation_id, :reply_to, :private]
 
   @doc false
   def new,
