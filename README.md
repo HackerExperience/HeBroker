@@ -1,6 +1,34 @@
 # HeBroker
 
-HeBroker is a broker for RPC through a PubSub interface
+HeBroker is a broker for RPC through a PubSub interface.
+
+By providing a simple interface with very simple and extendible functionality, it
+can easily be used as a broker for Events, a broker for Message Queues or even a
+simple broker for named applications on a cluster (ie: RPC). You can find a
+handful of examples on the `/examples` folder
+
+HeBroker works by instanciating a (usualy) named broker that holds a map of
+topics and handlers for each topic. Any process can subscribe to any topic by
+passing callbacks to consume messages sent to the very topic.
+
+```
+  # Consumption
+  {Consumer 1} "Subscribe me to topic 'test'" -> { Broker }
+  {Consumer 2} "Subscribe me to topic 'test'" -> { Broker }
+
+
+  # Publishing
+  {Publisher} "I want to send message to topic 'test'"" -> { Broker }
+  {Publisher} <- "Take this <callback>, just use it with your message as argument" { Broker }
+  {Publisher} ! *Apply <callback>*
+  <callback> ~~~> *Send message to {Consumer 1}*
+  <callback> ~~~> *Send message to {Consumer 2}*
+
+  # Monitoring
+  {Consumer 3} "Subscribe me to topic 'test'" -> { Broker }
+  {Consumer 3} ! *Dies*
+  { Broker } ! *Removes {Consumer 3} from topic 'test'*
+```
 
 ## Installation
 HeBroker requires Elixir v1.3

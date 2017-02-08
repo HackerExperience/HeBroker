@@ -9,12 +9,14 @@ defmodule HeBroker.Request do
   @processor @trace? && Just || Dont
 
   @type t :: %__MODULE__{
+    reply_to: pid | port | nil,
     message_id: reference,
     trace: [String.t],
     headers: Headers.t
   }
 
   defstruct \
+    reply_to: nil,
     message_id: nil,
     trace: [],
     headers: %Headers{}

@@ -12,11 +12,11 @@ defmodule HeBroker.Broker do
 
   defstruct [:routes, :consumers]
 
-  @spec start_link() :: GenServer.start
+  @spec start_link() :: GenServer.on_start
   def start_link,
     do: start_link([])
 
-  @spec start_link(atom | [term]) :: GenServer.start
+  @spec start_link(atom | [term]) :: GenServer.on_start
   def start_link(params) when is_list(params),
     do: GenServer.start_link(__MODULE__, params)
   def start_link(name) when is_atom(name),

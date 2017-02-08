@@ -28,7 +28,7 @@ defmodule HeBroker.PublisherTest do
   describe "cast" do
     test "broken callback won't affect the client", %{broker: broker} do
       callback = [cast: fn _, _, _, _ -> raise RuntimeError end]
-      ConsumerHelper.spawn_consumer(broker, "error", callback)
+      cons = ConsumerHelper.spawn_consumer(broker, "error", callback)
 
       error_log = capture_log fn ->
         assert %Request{} = Publisher.cast(broker, "error", :kthxbye)
@@ -41,6 +41,10 @@ defmodule HeBroker.PublisherTest do
       # But the task that was running the callback did and thus an error log was
       # issued naturaly
       assert error_log =~ "runtime"
+
+      # As the fail was on the callback, obviously the consumer should not have
+      # been affected
+      assert Process.alive?(cons)
     end
   end
 
@@ -107,7 +111,6 @@ defmodule HeBroker.PublisherTest do
       refute request == request_origin
       refute request.headers.app_id
       refute request.headers.correlation_id
-      refute request.headers.reply_to
     end
 
     test "if a request is passed, it's headers are kept", %{broker: broker} do

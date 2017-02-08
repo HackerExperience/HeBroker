@@ -10,8 +10,10 @@ defmodule HeBroker.Mixfile do
       build_embedded: Mix.env == :prod,
       start_permanent: Mix.env == :prod,
       elixirc_paths: compile_paths(Mix.env),
-      package: package,
-      deps: deps]
+      name: "HEBroker",
+      description: "A simple broker for RPC and event handling",
+      package: package(),
+      deps: deps()]
   end
 
   def application do
@@ -32,6 +34,9 @@ defmodule HeBroker.Mixfile do
     do: ["lib"]
 
   defp package do
-    []
+    [
+      files: ~w/mix.exs lib README.md/,
+      maintainers: ["Charlotte Lorelei Oliveira"],
+      links: %{"Phabricator" => "https://dev.hackerexperience.com/diffusion/BROKER/"}]
   end
 end
